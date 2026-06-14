@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IllinixOS: a RISC-V OS in the browser</title>
+  <meta name="description" content="A RISC-V (rv64) operating system, booted in the browser with QEMU compiled to WebAssembly." />
+  <!-- coop/coep shim for SharedArrayBuffer on static hosting; load first -->
+  <script src="./coi-serviceworker.js"></script>
+  <link rel="stylesheet" href="./vendor/xterm.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="masthead">
+      <span class="logo">IllinixOS</span>
+      <div>
+        <h1>A RISC-V operating system that runs in the browser</h1>
+        <div class="tag">rv64 kernel, booted by QEMU compiled to WebAssembly</div>
+      </div>
+      <span class="spacer"></span>
+    </header>
+
+    <section class="card">
+      <p>
+        IllinixOS is an rv64 operating-system kernel: preemptive multitasking,
+        <code>fork</code>/<code>exec</code>, Sv39 virtual memory, an ELF loader, and a virtio
+        block-device filesystem. It runs on the QEMU <code>virt</code> machine, with QEMU itself
+        compiled to WebAssembly. The kernel and disk image are the same ones that run under
+        native QEMU.
+      </p>
+      <div class="chips">
+        <span class="chip"><b>ISA</b> rv64g (M/S/U)</span>
+        <span class="chip"><b>MMU</b> Sv39 paging</span>
+        <span class="chip"><b>Sched</b> preemptive + fork/exec</span>
+        <span class="chip"><b>Disk</b> virtio-blk filesystem</span>
+        <span class="chip"><b>Boot</b> bare-metal M-mode</span>
+        <span class="chip"><b>Host</b> QEMU → WebAssembly</span>
+      </div>
+    </section>
+
+    <div class="toolbar">
+      <button class="btn" data-cmd="donut"  title="type: donut"  disabled>▶ 3D Donut</button>
+      <button class="btn" data-cmd="life"   title="type: life"   disabled>▶ Game of Life</button>
+      <button class="btn" data-cmd="maze"   title="type: maze"   disabled>▶ Maze solver</button>
+      <button class="btn" data-cmd="sort"   title="type: sort"   disabled>▶ Sorting</button>
+      <button class="btn" data-cmd="trek"   title="type: trek"   disabled>▶ Super Star Trek</button>
+      <button class="btn" data-cmd="rule30" title="type: rule30" disabled>▶ Rule 30</button>
+      <button class="btn" data-cmd="fibfib" title="type: fibfib" disabled>▶ Fork stress test</button>
+      <button class="btn" id="btn-reboot"   disabled>⟳ Reboot</button>
+      <span class="status"><span class="dot" id="statusdot"></span><span id="statustext">idle</span></span>
+    </div>
+
+    <p class="cmds">Or type a name in the shell:
+      <code>donut</code> <code>life</code> <code>maze</code> <code>sort</code>
+      <code>trek</code> <code>rule30</code> <code>fibfib</code></p>
+
+    <div class="screens">
+      <div class="screen console">
+        <div class="bar"><span class="taglabel">Kernel console</span><span>boot log · thread output</span><span class="uart">UART0</span></div>
+        <div class="term" id="term-console"></div>
+      </div>
+      <div class="screen shell">
+        <div class="bar"><span class="taglabel">Interactive shell</span><span>type a program name, e.g. <code>rule30</code></span><span class="uart">UART1</span></div>
+        <div class="term" id="term-shell"></div>
+      </div>
+    </div>
+
+    <details class="tour" open>
+      <summary>How it works</summary>
+      <div class="body">
+        <div class="steps" id="tour-steps">
+          <div class="step" data-step="mmode"><div class="num">1</div><div><h4>M-mode boot</h4><p>The kernel starts in machine mode at <code>0x80000000</code>, sets up PMP and trap delegation, then drops to supervisor mode. No firmware underneath.</p></div></div>
+          <div class="step" data-step="mmu"><div class="num">2</div><div><h4>Virtual memory</h4><p>Sv39 page tables map the kernel and devices. The timer and PLIC interrupt controller are brought up.</p></div></div>
+          <div class="step" data-step="disk"><div class="num">3</div><div><h4>Mount the disk</h4><p>A virtio-blk MMIO device is negotiated and the on-disk filesystem (<code>kfs.raw</code>) is mounted. The user programs live there.</p></div></div>
+          <div class="step" data-step="shell"><div class="num">4</div><div><h4>Shell in user mode</h4><p>The kernel <code>exec</code>s the shell (<code>termio</code>) on UART1. A program name <code>fork</code>s and <code>exec</code>s a child.</p></div></div>
+        </div>
+        <ul>
+          <li>Left pane (UART0): kernel console, boot log and background thread output.</li>
+          <li>Right pane (UART1): the interactive shell. The kernel drives two serial consoles at once.</li>
+          <li>The demo buttons run small userland programs that draw to the shell terminal. They are integer-only (no FP registers are saved across preemption), so the 3D demo uses fixed-point math.</li>
+        </ul>
+        <ul>
+          <li>QEMU is compiled to WebAssembly (ktock/qemu-wasm); its TCG engine JITs RISC-V to Wasm at runtime.</li>
+          <li>The guest is the standard QEMU <code>virt</code> board with extra NS16550 UARTs for the multi-console setup.</li>
+        </ul>
+      </div>
+    </details>
+
+    <footer>
+      Built with <a href="https://github.com/ktock/qemu-wasm" target="_blank" rel="noopener">qemu-wasm</a>
+      and <a href="https://xtermjs.org" target="_blank" rel="noopener">xterm.js</a>.
+    </footer>
+  </div>
+
+  <!-- don't fetch the wasm until launch is clicked -->
+  <div class="overlay" id="overlay">
+    <div class="box">
+      <h2>Boot IllinixOS</h2>
+      <p>Launches a RISC-V machine in the browser by downloading a WebAssembly build of QEMU
+      (a few MB). Desktop browsers work best. On the first visit the page may reload once to
+      enable the threading QEMU needs.</p>
+      <button class="btn primary launch" id="btn-launch">▶ Launch IllinixOS</button>
+    </div>
+  </div>
+
+  <script src="./vendor/xterm.js"></script>
+  <script src="./vendor/addon-fit.js"></script>
+  <script src="./vendor/xterm-pty.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

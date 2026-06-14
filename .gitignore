@@ -1,0 +1,12 @@
+# cruft only. don't add *.wasm/*.elf/*.raw here, they need to be tracked.
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+*.bak
+.idea/
+.vscode/
+*.log
+*.tmp
+node_modules/

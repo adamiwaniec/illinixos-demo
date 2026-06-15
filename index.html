@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>IllinixOS: a RISC-V OS in the browser</title>
-  <meta name="description" content="A RISC-V (rv64) operating system, booted in the browser with QEMU compiled to WebAssembly." />
+  <title>IllinixOS: a RISC-V kernel in the browser</title>
+  <meta name="description" content="A RISC-V (rv64g) operating-system kernel built for ECE 391, booted in the browser with QEMU compiled to WebAssembly." />
   <!-- coop/coep shim for SharedArrayBuffer on static hosting; load first -->
   <script src="./coi-serviceworker.js"></script>
   <link rel="stylesheet" href="./vendor/xterm.css" />
@@ -15,19 +15,26 @@
     <header class="masthead">
       <span class="logo">IllinixOS</span>
       <div>
-        <h1>A RISC-V operating system that runs in the browser</h1>
-        <div class="tag">rv64 kernel, booted by QEMU compiled to WebAssembly</div>
+        <h1>A RISC-V kernel we built, running in the browser</h1>
+        <div class="tag">our rv64g kernel, booted by QEMU compiled to WebAssembly</div>
       </div>
       <span class="spacer"></span>
+      <div class="authors">
+        <div class="authors-title">Authors</div>
+        <div class="author">Adam Iwaniec <span class="email">adamiwaniec47@gmail.com</span></div>
+        <div class="author">Yixuan Li <span class="email">yixuanl7@andrew.cmu.edu</span></div>
+        <div class="authors-course">ECE 391 · University of Illinois Urbana-Champaign</div>
+      </div>
     </header>
 
     <section class="card">
       <p>
-        IllinixOS is an rv64 operating-system kernel: preemptive multitasking,
+        IllinixOS is an rv64g operating-system kernel we wrote: preemptive multitasking,
         <code>fork</code>/<code>exec</code>, Sv39 virtual memory, an ELF loader, and a virtio
-        block-device filesystem. It runs on the QEMU <code>virt</code> machine, with QEMU itself
-        compiled to WebAssembly. The kernel and disk image are the same ones that run under
-        native QEMU.
+        block-device filesystem. This page runs that kernel live in the browser. QEMU is
+        compiled to WebAssembly here in order to boot it; the kernel and disk image here
+        are the same ones that run under native QEMU. This was built as the final project for ECE 391 (Computer
+        Systems Engineering) at the University of Illinois Urbana-Champaign.
       </p>
       <div class="chips">
         <span class="chip"><b>ISA</b> rv64g (M/S/U)</span>
@@ -73,22 +80,22 @@
           <div class="step" data-step="mmode"><div class="num">1</div><div><h4>M-mode boot</h4><p>The kernel starts in machine mode at <code>0x80000000</code>, sets up PMP and trap delegation, then drops to supervisor mode. No firmware underneath.</p></div></div>
           <div class="step" data-step="mmu"><div class="num">2</div><div><h4>Virtual memory</h4><p>Sv39 page tables map the kernel and devices. The timer and PLIC interrupt controller are brought up.</p></div></div>
           <div class="step" data-step="disk"><div class="num">3</div><div><h4>Mount the disk</h4><p>A virtio-blk MMIO device is negotiated and the on-disk filesystem (<code>kfs.raw</code>) is mounted. The user programs live there.</p></div></div>
-          <div class="step" data-step="shell"><div class="num">4</div><div><h4>Shell in user mode</h4><p>The kernel <code>exec</code>s the shell (<code>termio</code>) on UART1. A program name <code>fork</code>s and <code>exec</code>s a child.</p></div></div>
+          <div class="step" data-step="shell"><div class="num">4</div><div><h4>Shell in user mode</h4><p>The kernel <code>exec</code>s the shell (<code>termio</code>) on UART1. A program <code>fork</code>s and <code>exec</code>s a child.</p></div></div>
         </div>
         <ul>
           <li>Left pane (UART0): kernel console, boot log and background thread output.</li>
           <li>Right pane (UART1): the interactive shell. The kernel drives two serial consoles at once.</li>
-          <li>The demo buttons run small userland programs that draw to the shell terminal. They are integer-only (no FP registers are saved across preemption), so the 3D demo uses fixed-point math.</li>
+          <li>The demo buttons run small userland programs that draw to the shell pane.</li>
         </ul>
         <ul>
-          <li>QEMU is compiled to WebAssembly (ktock/qemu-wasm); its TCG engine JITs RISC-V to Wasm at runtime.</li>
+          <li>QEMU is compiled to WebAssembly (ktock/qemu-wasm) and emulates the whole RISC-V machine in the browser.</li>
           <li>The guest is the standard QEMU <code>virt</code> board with extra NS16550 UARTs for the multi-console setup.</li>
         </ul>
       </div>
     </details>
 
     <footer>
-      Built with <a href="https://github.com/ktock/qemu-wasm" target="_blank" rel="noopener">qemu-wasm</a>
+      This page is built with <a href="https://github.com/ktock/qemu-wasm" target="_blank" rel="noopener">qemu-wasm</a>
       and <a href="https://xtermjs.org" target="_blank" rel="noopener">xterm.js</a>.
     </footer>
   </div>

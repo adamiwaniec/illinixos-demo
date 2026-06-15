@@ -20,6 +20,12 @@ const $ = (sel) => document.querySelector(sel);
 let consoleTerm, shellTerm, slavePty, qemuModule, ready = false;
 let consoleAlive = false;
 const MAX_BOOT_RETRIES = 3;
+// pause before relaunching after a reboot. lets the old qemu worker die first;
+// if the new one starts while it's still up they fight over threads and the new
+// pty thread can fail to come up (dead shell).
+const REBOOT_GRACE_MS = 800;
+const DEBUG = false;  // set true to log the boot timeline to the devtools console
+const dbg = (...a) => { if (DEBUG) console.log("[illinix]", ...a); };
 
 function setStatus(kind, text) {
   const dot = $("#statusdot");
@@ -96,10 +102,13 @@ function sendToShell(data) {
 function onShellReady() {
   if (ready) return;
   ready = true;
+  dbg("shell ready (pty bridge live)");
   sessionStorage.removeItem("illinix-bootretry");
   markStep("shell", "done");
-  // termio eats the first input byte after boot, so feed it a throwaway Enter
-  setTimeout(() => sendToShell("\r"), 300);
+  // the first input burst after boot loses its leading byte to an rx overrun, so
+  // prime the uart with a throwaway DEL. a DEL is a no-op at the start of an empty
+  // line, so unlike a stray Enter it doesn't print a second prompt.
+  setTimeout(() => sendToShell("\x7f"), 300);
   setStatus("ready", "shell ready");
   enableControls(true);
   shellTerm.focus();
@@ -119,34 +128,64 @@ function startConsolePump() {
       if (!sawOutput) {
         sawOutput = true;
         consoleAlive = true;
-        sessionStorage.removeItem("illinix-bootretry");
+        dbg("console (uart0) alive");
+        // do NOT clear illinix-bootretry here. the console (uart0) comes up even
+        // when the shell (uart1/pty) is dead, so clearing it on console output
+        // would reset the counter every reload and recovery could never give up.
+        // only a genuine shell-ready (onShellReady) clears it.
         markStep("mmu", "done"); markStep("disk", "done"); markStep("shell", "active");
       }
     }
   }, 120);
 }
 
-// if nothing prints at all the wasm instance probably failed to start (happens
-// now and then right after a reload), so reload a few times rather than sit on
-// a dead shell. if the kernel is alive but the prompt text didn't match, just go.
+// stop the running qemu worker threads before navigating away, so the next
+// instance doesn't start while this one is still tearing down (that contention
+// is what leaves the pty/shell dead).
+function killQemuThreads() {
+  try { if (qemuModule && qemuModule.PThread) qemuModule.PThread.terminateAllThreads(); }
+  catch (e) { dbg("terminateAllThreads failed (ok):", e && e.message); }
+}
+
+// reload a few times, then give up and show an error. the retry count lives in
+// sessionStorage so it survives the reload; only a genuine shell-ready
+// (onShellReady) clears it, never console output.
+function recoverOrFail(reason) {
+  if (ready) return;
+  dbg("recover:", reason,
+      "| consoleAlive=", consoleAlive,
+      "| pty.readable=", slavePty && slavePty.readable,
+      "| pty.writable=", slavePty && slavePty.writable);
+  const n = +(sessionStorage.getItem("illinix-bootretry") || 0);
+  if (n < MAX_BOOT_RETRIES) {
+    sessionStorage.setItem("illinix-bootretry", n + 1);
+    sessionStorage.setItem("illinix-autostart", "1");
+    setStatus("boot", `${reason}, retrying ${n + 1}/${MAX_BOOT_RETRIES}`);
+    killQemuThreads();
+    location.reload();
+  } else {
+    sessionStorage.removeItem("illinix-bootretry");
+    setStatus("err", `${reason} (gave up after ${MAX_BOOT_RETRIES}); reload to retry`);
+    enableControls(false);
+  }
+}
+
+// the kernel always brings up the shell on a fresh boot, so a dead shell after
+// reload is a qemu-wasm/pty race, not a kernel bug. don't fake "ready": if the
+// console is up but no prompt showed, poke the shell. a live one reprompts; if it
+// stays silent the pty is dead, so reload and retry.
+let probed = false;
 function bootWatchdog() {
-  setTimeout(() => { if (!ready && consoleAlive) onShellReady(); }, 6000);
   setTimeout(() => {
-    if (ready || consoleAlive) return;
-    const n = +(sessionStorage.getItem("illinix-bootretry") || 0);
-    if (n < MAX_BOOT_RETRIES) {
-      sessionStorage.setItem("illinix-bootretry", n + 1);
-      sessionStorage.setItem("illinix-autostart", "1");
-      setStatus("boot", `boot stalled, retrying ${n + 1}/${MAX_BOOT_RETRIES}`);
-      location.reload();
-    } else {
-      sessionStorage.removeItem("illinix-bootretry");
-      setStatus("err", "qemu failed to start, reload the page");
-    }
-  }, 12000);
+    if (ready) return;
+    if (!consoleAlive) { recoverOrFail("qemu did not start"); return; }
+    if (!probed) { probed = true; sendToShell("\r"); }   // liveness probe
+  }, 6000);
+  setTimeout(() => recoverOrFail("shell did not come up"), 10000);
 }
 
 async function boot() {
+  dbg("boot start");
   setStatus("boot", "downloading WebAssembly…");
   makeTerminals();
   tapShellOutput();
@@ -184,6 +223,7 @@ async function boot() {
       try { FS.writeFile("/pack/ser0.out", new Uint8Array(0)); } catch (e) {}
     }],
     onRuntimeInitialized: function () {
+      dbg("wasm runtime initialized, qemu starting");
       markStep("mmode", "done"); markStep("mmu", "active");
       setStatus("boot", "kernel booting…");
       startConsolePump();
@@ -193,7 +233,11 @@ async function boot() {
       setStatus(code ? "err" : "", "halted (exit " + code + "), press reboot");
       enableControls(true);
     },
-    print: () => {}, printErr: () => {},
+    // route qemu's own stdout/stderr to the devtools console, NOT the shell
+    // terminal: the prompt-detection tap must only ever see real pty output, or
+    // a fallback print could fake a "ready" shell that can't take input.
+    print: (t) => dbg("qemu:", t),
+    printErr: (t) => console.warn("[qemu]", t),
   };
   qemuModule = Module;
 
@@ -223,7 +267,10 @@ document.querySelectorAll(".toolbar .btn[data-cmd]").forEach(btn => {
 });
 $("#btn-reboot").addEventListener("click", () => {
   sessionStorage.removeItem("illinix-bootretry");
+  // auto-reboot: relaunch through the graced autostart path (below) so the
+  // launch overlay never shows and the old worker has time to be reclaimed.
   sessionStorage.setItem("illinix-autostart", "1");
+  killQemuThreads();
   location.reload();
 });
 
@@ -232,13 +279,21 @@ function launch() {
   boot();
 }
 $("#btn-launch").addEventListener("click", launch);
-// re-launch after a reboot once isolation is back (can lag on static hosting)
+// auto-reboot path (reboot button / recovery set the flag): skip the launch
+// overlay and boot after the grace delay. a fresh page load has no flag, so it
+// still shows the overlay and waits for the button.
 if (sessionStorage.getItem("illinix-autostart") === "1") {
   sessionStorage.removeItem("illinix-autostart");
+  $("#overlay").classList.add("hidden");   // no launch screen on reboot
+  setStatus("boot", "rebooting…");
   let tries = 0;
-  (function tryLaunch() {
-    if (window.crossOriginIsolated) { launch(); return; }
-    if (tries++ < 20) { setTimeout(tryLaunch, 150); return; }
+  (function waitThenBoot() {
+    if (window.crossOriginIsolated) {
+      dbg(`isolation ready, booting in ${REBOOT_GRACE_MS}ms`);
+      setTimeout(boot, REBOOT_GRACE_MS);
+      return;
+    }
+    if (tries++ < 20) { setTimeout(waitThenBoot, 150); return; }
     setStatus("err", "cross-origin isolation unavailable, reload the page");
   })();
 }

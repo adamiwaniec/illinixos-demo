@@ -44,11 +44,14 @@ function enableControls(on) {
 function makeTerminals() {
   const common = {
     fontFamily: 'ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace',
-    fontSize: 13, theme: { background: "#000000", foreground: "#cfe3ff" },
+    fontSize: 13,
+    theme: { background: "#000000", foreground: "#cfe3ff",
+             black: "#000000", brightBlack: "#3a3a3a" },
     cursorBlink: true, scrollback: 4000,
   };
   consoleTerm = new Terminal({ ...common, convertEol: true, disableStdin: true,
-    theme: { background: "#000000", foreground: "#9ff5a9" } });
+    theme: { background: "#000000", foreground: "#9ff5a9",
+             black: "#000000", brightBlack: "#3a3a3a" } });
   shellTerm = new Terminal({ ...common });
   consoleTerm.open($("#term-console"));
   shellTerm.open($("#term-shell"));
@@ -59,19 +62,27 @@ function makeTerminals() {
     fit(shellTerm, $("#term-shell"));
   });
 }
-// use FitAddon if it loaded, else guess cols/rows from the element size
+const TERM_COLS = 80, TERM_ROWS = 30;
+const FONT_MAX = 15, FONT_MIN = 5;
+
 function fit(term, el) {
   try {
     if (window.FitAddon && window.FitAddon.FitAddon) {
       if (!term.__fit) { term.__fit = new FitAddon.FitAddon(); term.loadAddon(term.__fit); }
-      term.__fit.fit();
+      for (let fs = FONT_MAX; fs >= FONT_MIN; fs--) {
+        term.options.fontSize = fs;
+        term.__fit.fit();
+        if ((term.cols >= TERM_COLS && term.rows >= TERM_ROWS) || fs === FONT_MIN)
+          break;
+      }
       return;
     }
   } catch (e) { /* fall through */ }
-  const cw = 8.0, ch = 17;
-  const cols = Math.max(60, Math.floor((el.clientWidth - 16) / cw));
-  const rows = Math.max(18, Math.floor((el.clientHeight - 10) / ch));
-  term.resize(cols, rows);
+  const ratio = 0.60;                       // monospace advance / font-size
+  const fs = Math.max(FONT_MIN,
+                      Math.floor((el.clientWidth - 16) / (TERM_COLS * ratio)));
+  term.options.fontSize = fs;
+  term.resize(TERM_COLS, TERM_ROWS);
 }
 
 // watch shell output for the prompt to know the shell is live

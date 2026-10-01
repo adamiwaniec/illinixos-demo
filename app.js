@@ -274,6 +274,10 @@ document.querySelectorAll(".toolbar .btn[data-cmd]").forEach(btn => {
     const cmd = btn.getAttribute("data-cmd");
     shellTerm.focus();
     sendToShell(cmd + "\r");
+    // automatically enter trek once the program is running
+    // until then we wait in the uart rx buffer
+    if (btn.hasAttribute("data-enter"))
+      setTimeout(() => sendToShell("\r"), 1000);
   });
 });
 $("#btn-reboot").addEventListener("click", () => {

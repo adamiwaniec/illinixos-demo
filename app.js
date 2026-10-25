@@ -13,7 +13,9 @@ const QEMU_ARGS = [
   "-device", "virtio-blk-device,drive=blk0",
   "-serial", "file:/pack/ser0.out",   // uart0 -> console pane
   "-serial", "stdio",                  // uart1 -> shell pane
-  "-accel", "tcg,tb-size=500",
+  // 64 MB translation buffer. plenty for the kernel + demos, and it has to fit the
+  // fixed 512 MB wasm heap
+  "-accel", "tcg,tb-size=64",
 ];
 
 const $ = (sel) => document.querySelector(sel);
@@ -98,16 +100,9 @@ function tapShellOutput() {
     return orig(data, cb);
   };
 }
-// no public input() on xterm.js, so fire the data event directly; xterm-pty forwards it to stdin
+// feed data in as if typed (fires onData); xterm-pty forwards it to stdin
 function sendToShell(data) {
-  try {
-    const core = shellTerm._core;
-    if (core && core.coreService && core.coreService.triggerDataEvent) {
-      core.coreService.triggerDataEvent(data, true);
-      return;
-    }
-  } catch (e) { /* fall through */ }
-  try { shellTerm.paste(data); } catch (e) { /* give up */ }
+  shellTerm.input(data, true);
 }
 
 function onShellReady() {
